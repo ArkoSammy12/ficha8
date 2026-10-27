@@ -1,0 +1,14 @@
+[package]
+name = "ficha8"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+argh = "0.1.19"
+bytemuck = "1.25.2"
+rand = "0.10.3"
+sdl3 = {
+    version = "0.20.0",
+    features = ["build-from-source-static", "unsafe_textures"]
+}
