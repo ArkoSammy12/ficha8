@@ -91,7 +91,7 @@ impl Chip8 {
     }
 
     pub fn play_buzzer(&self) -> bool {
-        self.dt > 0
+        self.st > 0
     }
 
     pub fn dump_argb8(&self) -> [u32; GFX_LENGTH] {
@@ -258,7 +258,7 @@ impl Chip8 {
                             break;
                         }
                         if slice & slice_mask != 0 {
-                            let index: usize = (((slice_y as usize).wrapping_mul(GFX_WIDTH)) + (slice_x as usize));
+                            let index: usize = ((slice_y as usize).wrapping_mul(GFX_WIDTH)) + (slice_x as usize);
                             self.gfx[index] = !self.gfx[index];
                             if !self.gfx[index] {
                                 self.v[0xF] = 1;
@@ -301,6 +301,8 @@ impl Chip8 {
                             if first_pressed_key.is_none() || self.waiting_key != first_pressed_key {
                                 self.set_vx(opcode, waiting_key & 0xF);
                                 self.waiting_key = None;
+                            } else {
+                                self.decrement_pc();
                             }
                         } else {
                             self.waiting_key = first_pressed_key;

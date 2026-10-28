@@ -1,9 +1,10 @@
-//use std::env::Args;
-
 use std::ops::Div;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use argh::FromArgs;
+use sdl3::audio::{AudioCallback, AudioFormat, AudioSpec, AudioStream};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::{Color, PixelFormat};
@@ -23,6 +24,30 @@ struct Args {
     rom_file: PathBuf
 }
 
+struct Chip8Audio {
+    play_audio: Arc<AtomicBool>,
+    phase: usize
+}
+
+impl AudioCallback<i16> for Chip8Audio {
+
+    fn callback(&mut self, stream: &mut AudioStream, requested: i32) {
+        let mut buf: Box<[i16]> = Box::from_iter(std::iter::repeat_n(0, requested as usize));
+        if self.play_audio.load(Ordering::Acquire) {
+            for i in 0..requested {
+                let pattern = [0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0];
+                let sample: i16 = (if ((pattern[self.phase >> 3]) & (1 << (7 ^ (self.phase & 7)))) != 0 { 4 } else { -4 }) * 256;
+                buf[i as usize] = sample;
+                self.phase = (self.phase + 1) % 128;
+            }
+        } else {
+            self.phase = 0;
+        }
+        let _ = stream.put_data_i16(&*buf);
+    }
+
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Args = argh::from_env();
     let file = std::fs::read(args.rom_file)?;
@@ -31,6 +56,20 @@ fn main() -> anyhow::Result<()> {
     let sdl_context = sdl3::init()?;
     let video_subsystem = sdl_context.video()?;
     let audio_subsystem = sdl_context.audio()?;
+
+    let audio_spec: AudioSpec = AudioSpec {
+        freq: Some((4000.0 * 2.0f32.powf((175.0 - 64.0) / 48.0)) as i32),
+        channels: Some(1),
+        format: Some(AudioFormat::S16LE),
+    };
+
+    let chip8_play_audio = Arc::new(AtomicBool::new(false));
+    let chip8_audio = Chip8Audio {
+        play_audio: chip8_play_audio.clone(),
+        phase: 0,
+    };
+
+    let audio_stream = audio_subsystem.open_playback_stream(&audio_spec, chip8_audio)?;
 
     let scale: u32 = 25;
     let window = video_subsystem.window("ficha8", (GFX_WIDTH as u32) * scale, (GFX_HEIGHT as u32) * scale)
@@ -46,6 +85,7 @@ fn main() -> anyhow::Result<()> {
     unsafe {
         sdl3::sys::render::SDL_SetRenderLogicalPresentation(canvas.raw(), GFX_WIDTH as i32, GFX_HEIGHT as i32, SDL_RendererLogicalPresentation::LETTERBOX);
     }
+    audio_stream.resume()?;
 
     'running: loop {
 
@@ -74,6 +114,8 @@ fn main() -> anyhow::Result<()> {
         canvas.copy(&texture, None, None)?;
         canvas.present();
 
+        chip8_play_audio.store(chip8.play_buzzer(), Ordering::Release);
+
         let duration = Duration::from_secs(1).div(chip8::FPS);
         std::thread::sleep(duration.saturating_sub(Instant::now() - start));
     }
@@ -101,4 +143,5 @@ fn poll_chip8_keypad(chip8: &mut Chip8, keycode: Keycode, value: bool) {
         Keycode::V => chip8.set_key(0xF, value),
         _ => {}
     }
+
 }
